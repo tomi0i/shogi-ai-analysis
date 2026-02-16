@@ -13,7 +13,6 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # やねうら王をビルド
-# やねうら王をビルド
 RUN git clone https://github.com/yaneurao/YaneuraOu.git /tmp/YaneuraOu && \
     cd /tmp/YaneuraOu/source && \
     make tournament COMPILER=g++ TARGET_CPU=AVX2 && \
@@ -23,7 +22,7 @@ RUN git clone https://github.com/yaneurao/YaneuraOu.git /tmp/YaneuraOu && \
     rm -rf /tmp/YaneuraOu && \
     mkdir -p /app/engines/eval && \
     cd /app/engines/eval && \
-    wget https://github.com/yaneurao/YaneuraOu/releases/download/v7.6.3/nn.bin && \
+    wget https://github.com/mizar/YaneuraOu/releases/download/NNUE-eval-20211103/nn.bin && \
     chmod 644 nn.bin
 
 # package.jsonとpackage-lock.jsonをコピー
