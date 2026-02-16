@@ -52,8 +52,15 @@ function initEngine() {
                 if (output.includes('usiok')) {
                     engineReady = true;
                     console.log('✅ やねうら王準備完了');
-                    engineProcess.stdin.write('isready\n');
-                }
+    
+                // 無料枠向けにメモリ設定を軽くする
+                console.log('⚙️ メモリ設定を調整中...');
+                engineProcess.stdin.write('setoption name USI_Hash value 128\n');  // 128MBに削減
+                engineProcess.stdin.write('setoption name Threads value 1\n');     // 1スレッドに削減
+                engineProcess.stdin.write('setoption name FV_SCALE value 20\n');   // Háo評価関数の推奨値
+    
+                engineProcess.stdin.write('isready\n');
+            }
 
                 if (output.includes('readyok')) {
                     console.log('✅ エンジン初期化完了');
