@@ -203,6 +203,13 @@ setTimeout(() => {
 
 ## 📄 ライセンス
 
+このサービスは以下のオープンソースソフトウェアを使用しています：
+
+- **やねうら王** (GPLv3) - https://github.com/yaneurao/YaneuraOu
+  - 作者: yaneurao
+  - ライセンス: GNU General Public License v3.0
+
+本サービスのソースコードもGPLv3に基づき公開されています。
 - このプロジェクト: MIT License
 - やねうら王: GPLv3
 
