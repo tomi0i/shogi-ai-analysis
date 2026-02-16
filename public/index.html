@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>将棋AI分析サービス</title>
+    <script src="https://cdn.jsdelivr.net/npm/shogi.js@0.5.9/dist/shogi.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -82,6 +84,12 @@
             box-shadow: 0 10px 30px rgba(0, 212, 255, 0.7);
         }
 
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .btn-secondary {
             background: rgba(255, 0, 110, 0.2);
             border: 2px solid var(--secondary);
@@ -143,6 +151,50 @@
             to { transform: rotate(360deg); }
         }
 
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), #0099cc);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 20px 0;
+        }
+
+        .sample-buttons {
+            margin: 10px 0;
+        }
+
+        .sample-btn {
+            padding: 8px 15px;
+            background: rgba(0, 212, 255, 0.2);
+            border: 1px solid var(--primary);
+            color: var(--text);
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 3px;
+            font-size: 0.9rem;
+        }
+
+        .sample-btn:hover {
+            background: rgba(0, 212, 255, 0.4);
+        }
+
         footer {
             text-align: center;
             padding: 20px;
@@ -165,11 +217,19 @@
     <div class="container">
         <header>
             <h1>将棋AI分析</h1>
-            <p class="subtitle">powered by やねうら王</p>
+            <p class="subtitle">powered by やねうら王 + Háo評価関数</p>
         </header>
 
         <div class="panel">
-            <h2>📋 棋譜入力</h2>
+            <h2>📋 棋譜入力（KIF形式）</h2>
+            <p style="margin-bottom: 10px; color: rgba(255,255,255,0.7);">
+                KIF形式の棋譜を貼り付けてください。サンプルで試すこともできます。
+            </p>
+            
+            <div class="sample-buttons">
+                <button class="sample-btn" onclick="loadSample()">サンプル棋譜を読み込む</button>
+            </div>
+
             <textarea id="kifu-input" placeholder="KIF形式の棋譜を貼り付けてください...
 
 例:
@@ -182,9 +242,12 @@
    1 ７六歩(77)
    2 ３四歩(33)
    3 ２六歩(27)
+   4 ４四歩(43)
+   5 ２五歩(26)
 ..."></textarea>
+            
             <div style="margin-top: 15px;">
-                <button class="btn" onclick="analyzeKifu()">🔍 AI分析を開始</button>
+                <button class="btn" id="analyze-btn" onclick="analyzeKifu()">🔍 AI分析を開始</button>
                 <button class="btn btn-secondary" onclick="clearInput()">🗑️ クリア</button>
             </div>
             <div id="status"></div>
@@ -192,47 +255,278 @@
 
         <div class="panel" id="result-panel" style="display: none;">
             <h2>📊 分析結果</h2>
-            <div id="analysis-result">
-                <div class="loading"><div class="spinner"></div>分析中...</div>
+            <div id="progress-container" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill">0%</div>
+                </div>
+                <p id="progress-text" style="text-align: center; margin-top: 10px;"></p>
+            </div>
+            <div id="analysis-result"></div>
+            <div class="chart-container" id="chart-container" style="display: none;">
+                <canvas id="eval-chart"></canvas>
             </div>
         </div>
     </div>
 
     <footer>
-        Powered by <a href="https://github.com/yaneurao/YaneuraOu" target="_blank">やねうら王</a> (GPLv3)
+        Powered by <a href="https://github.com/yaneurao/YaneuraOu" target="_blank">やねうら王</a> (GPLv3) | 
+        評価関数: <a href="https://github.com/nodchip/tanuki-" target="_blank">Háo by nodchip</a>
     </footer>
 
     <script>
         const API_URL = window.location.origin;
+        let analysisChart = null;
+
+        const sampleKifu = `開始日時：2024/01/01 00:00:00
+棋戦：サンプル対局
+手合割：平手
+先手：先手
+後手：後手
+手数----指手---------消費時間--
+   1 ７六歩(77)
+   2 ３四歩(33)
+   3 ２六歩(27)
+   4 ４四歩(43)
+   5 ２五歩(26)
+   6 ３三角(22)
+   7 ４八銀(39)
+   8 ３二銀(31)
+   9 ６八玉(59)
+  10 ４二飛(82)`;
+
+        function loadSample() {
+            document.getElementById('kifu-input').value = sampleKifu;
+            showStatus('サンプル棋譜を読み込みました', 'info');
+        }
+
+        function parseKIF(kifText) {
+            const moves = [];
+            const lines = kifText.split('\n');
+            
+            for (const line of lines) {
+                // 手数のパターンにマッチ
+                const match = line.match(/^\s*\d+\s+(.+?)(?:\(|\s|$)/);
+                if (match) {
+                    const moveStr = match[1].trim();
+                    if (moveStr && moveStr !== '投了' && moveStr !== '中断' && moveStr !== '持将棋') {
+                        moves.push(moveStr);
+                    }
+                }
+            }
+            
+            return moves;
+        }
+
+        function convertKIFtoUSI(kifMoves) {
+            try {
+                const game = new Shogi.Shogi();
+                const usiMoves = [];
+                
+                for (const move of kifMoves) {
+                    const legalMoves = game.moves();
+                    
+                    // KIF形式の手を正規化
+                    let kifMove = move.replace(/成/g, '+');
+                    
+                    // 合法手の中から一致するものを探す
+                    let found = false;
+                    for (const legalMove of legalMoves) {
+                        const legalKIF = game.toKIF(legalMove);
+                        if (legalKIF === kifMove || legalKIF.startsWith(kifMove)) {
+                            usiMoves.push(legalMove);
+                            game.move(legalMove);
+                            found = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!found) {
+                        console.warn('手を変換できませんでした:', move);
+                        break;
+                    }
+                }
+                
+                return usiMoves;
+            } catch (error) {
+                console.error('KIF変換エラー:', error);
+                return null;
+            }
+        }
+
+        function generateSFENs(usiMoves) {
+            const game = new Shogi.Shogi();
+            const sfens = [game.toSFEN()]; // 初期局面
+            
+            for (const move of usiMoves) {
+                game.move(move);
+                sfens.push(game.toSFEN());
+            }
+            
+            return sfens;
+        }
 
         async function analyzeKifu() {
             const kifuText = document.getElementById('kifu-input').value.trim();
             
             if (!kifuText) {
-                showStatus('棋譜を入力してください', 'error');
+                showStatus('❌ 棋譜を入力してください', 'error');
                 return;
             }
 
+            const analyzeBtn = document.getElementById('analyze-btn');
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = '分析中...';
+
             try {
-                showStatus('サーバーに接続中...', 'info');
-                document.getElementById('result-panel').style.display = 'block';
-                document.getElementById('analysis-result').innerHTML = '<div class="loading"><div class="spinner"></div>AIが分析中...</div>';
-
-                const response = await fetch(`${API_URL}/api/health`);
-                const health = await response.json();
-
-                if (health.engine === 'ready') {
-                    showStatus('✅ AI分析準備完了！（実装中）', 'success');
-                    document.getElementById('analysis-result').innerHTML = '<div class="status info">AI分析機能は現在開発中です。<br>やねうら王エンジンは正常に動作しています。</div>';
-                } else {
-                    showStatus('⚠️ AIエンジン起動中...しばらくお待ちください', 'info');
+                // KIF解析
+                showStatus('📖 棋譜を解析中...', 'info');
+                const kifMoves = parseKIF(kifuText);
+                
+                if (kifMoves.length === 0) {
+                    throw new Error('有効な手が見つかりませんでした');
                 }
 
+                showStatus(`✅ ${kifMoves.length}手の棋譜を認識しました`, 'success');
+                
+                // USI形式に変換
+                const usiMoves = convertKIFtoUSI(kifMoves);
+                if (!usiMoves) {
+                    throw new Error('棋譜の変換に失敗しました');
+                }
+
+                // SFEN生成
+                const sfens = generateSFENs(usiMoves);
+                
+                // 分析開始
+                document.getElementById('result-panel').style.display = 'block';
+                document.getElementById('progress-container').style.display = 'block';
+                document.getElementById('analysis-result').innerHTML = '';
+                
+                showStatus(`🤖 AI分析中... (${sfens.length}局面)`, 'info');
+                
+                const results = [];
+                
+                for (let i = 0; i < sfens.length; i++) {
+                    updateProgress(i, sfens.length);
+                    
+                    try {
+                        const response = await fetch(`${API_URL}/api/analyze`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                sfen: sfens[i],
+                                depth: 12
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('分析APIエラー');
+                        }
+
+                        const result = await response.json();
+                        results.push({
+                            moveNum: i,
+                            score: result.score,
+                            bestmove: result.bestmove
+                        });
+                        
+                    } catch (error) {
+                        console.error(`局面${i}の分析エラー:`, error);
+                        results.push({
+                            moveNum: i,
+                            score: null,
+                            error: error.message
+                        });
+                    }
+                }
+
+                updateProgress(sfens.length, sfens.length);
+                showStatus('✅ 分析完了！', 'success');
+                
+                displayResults(results, kifMoves);
+                
             } catch (error) {
                 console.error('エラー:', error);
                 showStatus(`❌ エラー: ${error.message}`, 'error');
-                document.getElementById('analysis-result').innerHTML = `<div class="status error">サーバーに接続できません</div>`;
+                document.getElementById('analysis-result').innerHTML = 
+                    `<div class="status error">棋譜の解析に失敗しました: ${error.message}</div>`;
+            } finally {
+                analyzeBtn.disabled = false;
+                analyzeBtn.textContent = '🔍 AI分析を開始';
             }
+        }
+
+        function updateProgress(current, total) {
+            const percent = Math.floor((current / total) * 100);
+            document.getElementById('progress-fill').style.width = percent + '%';
+            document.getElementById('progress-fill').textContent = percent + '%';
+            document.getElementById('progress-text').textContent = 
+                `分析中: ${current}/${total}局面`;
+        }
+
+        function displayResults(results, moves) {
+            // グラフ表示
+            document.getElementById('chart-container').style.display = 'block';
+            
+            const labels = results.map(r => r.moveNum + '手');
+            const scores = results.map(r => r.score || 0);
+            
+            if (analysisChart) {
+                analysisChart.destroy();
+            }
+            
+            const ctx = document.getElementById('eval-chart').getContext('2d');
+            analysisChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '評価値',
+                        data: scores,
+                        borderColor: 'rgb(0, 212, 255)',
+                        backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        tension: 0.3,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: { color: '#ffffff' }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                            ticks: { color: '#ffffff' }
+                        },
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                            ticks: { color: '#ffffff' }
+                        }
+                    }
+                }
+            });
+
+            // サマリー表示
+            const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+            const maxScore = Math.max(...scores);
+            const minScore = Math.min(...scores);
+            
+            const html = `
+                <div class="status info">
+                    <h3>📈 分析サマリー</h3>
+                    <p>総手数: ${results.length - 1}手</p>
+                    <p>平均評価値: ${avgScore.toFixed(0)}</p>
+                    <p>最大評価値: +${maxScore} (先手有利)</p>
+                    <p>最小評価値: ${minScore} (後手有利)</p>
+                </div>
+            `;
+            
+            document.getElementById('analysis-result').innerHTML = html;
+            document.getElementById('progress-container').style.display = 'none';
         }
 
         function showStatus(message, type) {
@@ -245,21 +539,27 @@
             document.getElementById('kifu-input').value = '';
             document.getElementById('status').textContent = '';
             document.getElementById('result-panel').style.display = 'none';
+            if (analysisChart) {
+                analysisChart.destroy();
+                analysisChart = null;
+            }
         }
 
         // サーバー接続確認
-        fetch(`${API_URL}/api/health`)
-            .then(r => r.json())
-            .then(data => {
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_URL}/api/health`);
+                const data = await response.json();
+                
                 if (data.engine === 'ready') {
-                    showStatus('✅ AIエンジン準備完了', 'success');
+                    showStatus('✅ AIエンジン準備完了 - 分析可能です', 'success');
                 } else {
                     showStatus('⚠️ AIエンジン起動中...', 'info');
                 }
-            })
-            .catch(error => {
+            } catch (error) {
                 showStatus('❌ サーバーに接続できません', 'error');
-            });
+            }
+        });
     </script>
 </body>
 </html>
