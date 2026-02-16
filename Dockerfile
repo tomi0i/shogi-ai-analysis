@@ -25,7 +25,7 @@ RUN git clone https://github.com/yaneurao/YaneuraOu.git /tmp/YaneuraOu && \
 COPY package*.json ./
 
 # 依存関係をインストール
-RUN npm ci --only=production
+RUN npm install --production
 
 # アプリケーションファイルをコピー
 COPY . .
