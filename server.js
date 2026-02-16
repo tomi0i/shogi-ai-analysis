@@ -34,7 +34,10 @@ function initEngine() {
         console.log('🚀 やねうら王を起動中...');
         
         try {
-            engineProcess = spawn(ENGINE_PATH);
+            const engineDir = path.dirname(ENGINE_PATH);
+            engineProcess = spawn(ENGINE_PATH, [], {
+                cwd: engineDir
+            });
             
             engineProcess.stdout.on('data', (data) => {
                 const output = data.toString();
