@@ -10,24 +10,34 @@ RUN apt-get update && apt-get install -y \
     make \
     git \
     wget \
-    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# やねうら王と評価関数を一緒にビルド
+# やねうら王をビルド
 RUN git clone --depth 1 https://github.com/yaneurao/YaneuraOu.git /tmp/YaneuraOu && \
     cd /tmp/YaneuraOu/source && \
     make tournament COMPILER=g++ TARGET_CPU=AVX2 && \
     mkdir -p /app/engines && \
     cp YaneuraOu-by-gcc /app/engines/ && \
     chmod +x /app/engines/YaneuraOu-by-gcc && \
-    mkdir -p /app/engines/eval && \
-    echo "評価関数ファイルを探しています..." && \
-    (find /tmp/YaneuraOu -type f \( -name "*.nnue" -o -name "nn.bin" \) | head -1 | xargs -I {} cp {} /app/engines/eval/nn.bin && echo "✅ リポジトリから評価関数をコピーしました") || \
-    (echo "⚠️ リポジトリに評価関数がないため、Stockfishからダウンロードします" && \
-     wget -O /app/engines/eval/nn.bin https://tests.stockfishchess.org/api/nn/nn-0000000000a0.nnue && echo "✅ Stockfish評価関数をダウンロードしました") && \
-    ls -lh /app/engines/eval/nn.bin && \
-    chmod 644 /app/engines/eval/nn.bin && \
     rm -rf /tmp/YaneuraOu
+
+# 評価関数ファイルをダウンロード（Stockfish NNUE）
+RUN mkdir -p /app/engines/eval && \
+    cd /app/engines/eval && \
+    echo "📥 評価関数ファイルをダウンロード中..." && \
+    wget --timeout=60 --tries=3 --progress=bar:force \
+         -O nn.bin \
+         https://tests.stockfishchess.org/api/nn/nn-0000000000a0.nnue && \
+    echo "✅ ダウンロード完了" && \
+    FILE_SIZE=$(stat -c%s nn.bin) && \
+    echo "📦 ファイルサイズ: $FILE_SIZE バイト" && \
+    if [ "$FILE_SIZE" -lt 1000000 ]; then \
+        echo "❌ エラー: ファイルサイズが小さすぎます（1MB未満）" && \
+        exit 1; \
+    fi && \
+    chmod 644 nn.bin && \
+    ls -lh nn.bin && \
+    echo "🎉 評価関数ファイル準備完了"
 
 # package.jsonとpackage-lock.jsonをコピー
 COPY package*.json ./
