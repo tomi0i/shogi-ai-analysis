@@ -13,13 +13,18 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # やねうら王をビルド
+# やねうら王をビルド
 RUN git clone https://github.com/yaneurao/YaneuraOu.git /tmp/YaneuraOu && \
     cd /tmp/YaneuraOu/source && \
     make tournament COMPILER=g++ TARGET_CPU=AVX2 && \
     mkdir -p /app/engines && \
     cp YaneuraOu-by-gcc /app/engines/ && \
     chmod +x /app/engines/YaneuraOu-by-gcc && \
-    rm -rf /tmp/YaneuraOu
+    rm -rf /tmp/YaneuraOu && \
+    mkdir -p /app/engines/eval && \
+    cd /app/engines/eval && \
+    wget https://github.com/yaneurao/YaneuraOu/releases/download/v7.6.3/nn.bin && \
+    chmod 644 nn.bin
 
 # package.jsonとpackage-lock.jsonをコピー
 COPY package*.json ./
