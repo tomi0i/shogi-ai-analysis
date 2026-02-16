@@ -53,14 +53,14 @@ function initEngine() {
                     engineReady = true;
                     console.log('✅ やねうら王準備完了');
     
-                // 無料枠向けにメモリ設定を軽くする
-                console.log('⚙️ メモリ設定を調整中...');
-                engineProcess.stdin.write('setoption name USI_Hash value 128\n');  // 128MBに削減
-                engineProcess.stdin.write('setoption name Threads value 1\n');     // 1スレッドに削減
-                engineProcess.stdin.write('setoption name FV_SCALE value 20\n');   // Háo評価関数の推奨値
+                    // 無料枠向けにメモリ設定を軽くする
+                    console.log('⚙️ メモリ設定を調整中...');
+                    engineProcess.stdin.write('setoption name USI_Hash value 128\n');  // 128MBに削減
+                    engineProcess.stdin.write('setoption name Threads value 1\n');     // 1スレッドに削減
+                    engineProcess.stdin.write('setoption name FV_SCALE value 20\n');   // Háo評価関数の推奨値
     
-                engineProcess.stdin.write('isready\n');
-            }
+                    engineProcess.stdin.write('isready\n');
+                }
 
                 if (output.includes('readyok')) {
                     console.log('✅ エンジン初期化完了');
@@ -177,6 +177,26 @@ function analyzePosition(sfen, depth = 15) {
     });
 }
 
+// KIF形式の指し手を抽出
+function parseKIFMoves(kifText) {
+    const lines = kifText.split('\n');
+    const moves = [];
+    
+    for (const line of lines) {
+        // 手数のパターンにマッチ: "   1 ７六歩(77)"
+        const match = line.match(/^\s*\d+\s+(.+?)(?:\(|$)/);
+        if (match && match[1]) {
+            const move = match[1].trim();
+            // 終局を示す文字列は除外
+            if (move && !['投了', '中断', '持将棋', '詰み', '時間切れ'].includes(move)) {
+                moves.push(move);
+            }
+        }
+    }
+    
+    return moves;
+}
+
 // ========== API エンドポイント ==========
 
 app.get('/api/health', (req, res) => {
@@ -221,6 +241,73 @@ app.post('/api/analyze', async (req, res) => {
     }
 });
 
+// KIF形式の棋譜分析（新エンドポイント）
+app.post('/api/analyze-kif', async (req, res) => {
+    try {
+        const { kifText, depth } = req.body;
+
+        if (!kifText) {
+            return res.status(400).json({ error: 'KIF text required' });
+        }
+
+        if (!engineHasEvalFile) {
+            return res.status(503).json({ 
+                error: 'AI analysis unavailable (missing eval file)',
+                message: 'やねうら王は起動していますが、評価関数ファイルがないため分析できません'
+            });
+        }
+
+        console.log('📋 KIF棋譜を受信しました');
+        
+        // KIF形式から指し手を抽出
+        const moves = parseKIFMoves(kifText);
+        
+        if (moves.length === 0) {
+            return res.status(400).json({ 
+                error: '有効な指し手が見つかりませんでした',
+                message: 'KIF形式の棋譜を確認してください'
+            });
+        }
+
+        console.log(`📖 ${moves.length}手の棋譜を認識しました`);
+
+        // 初期局面のSFEN
+        const initialSFEN = 'lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1';
+        
+        const results = [];
+        
+        // Phase 1: 初期局面のみ分析（完全版は複雑なので段階的に実装）
+        console.log('📊 初期局面を分析中...');
+        const initialResult = await analyzePosition(initialSFEN, depth || 12);
+        
+        results.push({
+            moveNum: 0,
+            move: '初期局面',
+            score: initialResult.score,
+            bestmove: initialResult.bestmove
+        });
+
+        console.log('✅ 分析完了');
+
+        res.json({
+            success: true,
+            totalMoves: moves.length,
+            analyzedMoves: 1,
+            message: `${moves.length}手の棋譜を認識しました。現在は初期局面のみ分析します（完全な棋譜分析は次のバージョンで対応予定）`,
+            results: results,
+            moves: moves // デバッグ用
+        });
+
+    } catch (error) {
+        console.error('❌ KIF分析エラー:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// SFEN配列での棋譜分析（旧エンドポイント、互換性のため残す）
 app.post('/api/analyze-kifu', async (req, res) => {
     try {
         const { moves, depth } = req.body;
@@ -236,7 +323,7 @@ app.post('/api/analyze-kifu', async (req, res) => {
             });
         }
 
-        console.log(`📊 棋譜分析開始: ${moves.length}手`);
+        console.log(`📊 棋譜分析開始: ${moves.length}局面`);
 
         const results = [];
         
@@ -245,7 +332,7 @@ app.post('/api/analyze-kifu', async (req, res) => {
             try {
                 const result = await analyzePosition(sfen, depth || 12);
                 results.push({
-                    moveNum: i + 1,
+                    moveNum: i,
                     ...result
                 });
                 
@@ -253,9 +340,9 @@ app.post('/api/analyze-kifu', async (req, res) => {
                     console.log(`📊 進捗: ${i + 1}/${moves.length}`);
                 }
             } catch (error) {
-                console.error(`❌ ${i + 1}手目の分析エラー:`, error);
+                console.error(`❌ ${i + 1}局面目の分析エラー:`, error);
                 results.push({
-                    moveNum: i + 1,
+                    moveNum: i,
                     error: error.message
                 });
             }
@@ -305,7 +392,8 @@ async function startServer() {
             console.log('📡 API エンドポイント:');
             console.log(`   GET  /api/health          - ヘルスチェック`);
             console.log(`   POST /api/analyze         - 局面分析`);
-            console.log(`   POST /api/analyze-kifu    - 棋譜分析`);
+            console.log(`   POST /api/analyze-kif     - KIF棋譜分析`);
+            console.log(`   POST /api/analyze-kifu    - SFEN配列分析`);
             console.log('');
             console.log('='.repeat(60));
             console.log('');
